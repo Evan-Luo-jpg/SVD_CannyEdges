@@ -1,32 +1,32 @@
-import objaverse
-import random
+import objaverse.xl as oxl
+import pandas as pd
 import json
 import os
 
-# Load all available UIDs
-uids = objaverse.load_uids()
+OUTPUT_PATH = "scripts/my_5_objects.json"
+NUM_OBJECTS = 5
 
-# Sample 5
-sampled_uids = random.sample(uids, 5)
+def sample_from_annotations(n=5, out_path=OUTPUT_PATH):
+    # Step 1: Load the full metadata dataframe
+    annotations = oxl.get_alignment_annotations(download_dir="~/.objaverse")
 
-# Download and get metadata
-objects = objaverse._download_object(sampled_uids)
+    # Step 2: Sample N objects
+    sampled = annotations.sample(n)
 
-# Format into expected JSON
-formatted = []
-for uid in sampled_uids:
-    metadata = objaverse.get_metadata(uid)  # Assuming get_metadata() retrieves metadata for a UID
-    formatted.append({
-        "fileIdentifier": objects["fileIdentifier"],
-        "sha256": metadata["sha256"],
-        "repo": metadata["repo"],
-        "ref": metadata["ref"],
-        "path": metadata["path"]
-    })
+    # Step 3: Format the JSON output
+    result = []
+    for _, row in sampled.iterrows():
+        result.append({
+            "sha256": row["sha256"],
+            "fileIdentifier": row["fileIdentifier"],
+            "source": row["source"],
+        })
 
-# Save to file
-os.makedirs("scripts", exist_ok=True)
-with open("scripts/my_objects.json", "w") as f:
-    json.dump(formatted, f, indent=2)
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(result, f, indent=2)
 
-print("Saved to scripts/my_objects.json")
+    print(f"Saved {n} sampled objects to {out_path}")
+
+if __name__ == "__main__":
+    sample_from_annotations()
