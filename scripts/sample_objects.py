@@ -3,7 +3,8 @@ import pandas as pd
 import json
 import os
 
-OUTPUT_PATH = "scripts/my_5_objects.json"
+
+OUTPUT_PATH = "objaverse-xl/scripts/rendering/my_5_objects.json"
 NUM_OBJECTS = 5
 
 def sample_from_annotations(n=5, out_path=OUTPUT_PATH):
