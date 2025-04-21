@@ -1,3 +1,5 @@
 .venv/
 objaverse-xl/
 renders/
+generative-models/
+diffusers/
