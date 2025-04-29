@@ -1,0 +1,11 @@
+accelerate launch train/train_svd_lora.py \
+  --pretrained_model_name_or_path stabilityai/stable-video-diffusion-img2vid-xt \
+  --base_folder ~/scratch/CVFinal/dataset \
+  --output_dir ~/scratch/CVFinal \
+  --resolution 576 1024 \
+  --num_train_epochs 50 \
+  --per_gpu_batch_size 1 \
+  --gradient_accumulation_steps 4 \
+  --learning_rate 1e-4 \
+  --mixed_precision fp16 \
+  --checkpoints_total_limit 5
