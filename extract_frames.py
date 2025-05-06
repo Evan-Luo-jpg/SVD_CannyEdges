@@ -40,15 +40,9 @@ def extract_frames(video_path, output_dir, target_fps=24):
     cap.release()
     print(f"Saved {saved_count} frames to: {frame_output_dir}")
 
-    # Delete original video
-    try:
-        os.remove(video_path)
-        print(f"Deleted original video: {video_path}")
-    except Exception as e:
-        print(f"Failed to delete video: {e}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Extract frames at 24 fps from a video and delete the video.")
+    parser = argparse.ArgumentParser(description="Extract frames at 24 fps from a video.")
     parser.add_argument("--video_path", type=str, required=True, help="Path to the input video file.")
     parser.add_argument("--output_dir", type=str, required=True, help="Directory to save extracted frames.")
     args = parser.parse_args()

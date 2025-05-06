@@ -1,4 +1,4 @@
-BASE_FOLDER=~/scratch/CVFinal/dataset
+BASE_FOLDER=~/scratch/CVFinal/videos
 OUTPUT_DIR=~/scratch/CVFinal/dataset
 PYTHON_DIR=~/scratch/CVFinal
 

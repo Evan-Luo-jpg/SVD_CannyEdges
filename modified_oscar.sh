@@ -6,6 +6,7 @@ BASE_FOLDER=~/scratch/CVFinal
 
 accelerate launch --num_processes=2 train_svd_lora.py \
   --pretrained_model_name_or_path=stabilityai/stable-video-diffusion-img2vid-xt \
+  --pretrain_unet=${BASE_FOLDER}
   --base_folder=${BASE_FOLDER}/dataset \
   --output_dir=${BASE_FOLDER} \
   --num_train_epochs=1 \
