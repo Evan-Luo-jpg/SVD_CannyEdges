@@ -72,7 +72,6 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
     @register_to_config
     def __init__(
         self,
-        control_channels: int = 1,
         sample_size: Optional[int] = None,
         in_channels: int = 8,
         out_channels: int = 4,
@@ -129,7 +128,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
 
         # input
         self.conv_in = nn.Conv2d(
-            in_channels + control_channels,
+            in_channels,
             block_out_channels[0],
             kernel_size=3,
             padding=1,

@@ -49,12 +49,6 @@ def extract_frames_with_edges(video_path, output_dir, target_fps=24):
     cap.release()
     print(f"Saved {saved_count} frames and edge maps to: {frame_output_dir}")
 
-    # Delete original video
-    try:
-        os.remove(video_path)
-        print(f"Deleted original video: {video_path}")
-    except Exception as e:
-        print(f"Failed to delete video: {e}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Extract frames and Canny edges from a video.")
