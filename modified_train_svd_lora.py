@@ -25,6 +25,7 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
+from torchinfo import summary
 import accelerate
 import numpy as np
 import PIL
@@ -79,11 +80,11 @@ class EdgeEncoder(nn.Module):
     def __init__(self, out_channels):
         super().__init__()
         self.encoder = nn.Sequential(
-            nn.Conv2d(1, 64, 3, padding=1),
+            nn.Conv2d(1, 32, 3, padding=1),
             nn.SiLU(),
-            nn.Conv2d(64, 128, 3, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(128, out_channels, 3, padding=1),
+            nn.MaxPool2d(2),  # halve spatial dims
+            nn.MaxPool2d(2),  # halve spatial dims
+            nn.Conv2d(32, out_channels, 3, padding=1),
         )
 
     def forward(self, edge_map):  # (B, 1, H, W)
@@ -654,6 +655,7 @@ def main():
 
     #Auto enable gradient checkpointing
     unet.gradient_checkpointing = True
+    edge_encoder.gradient_checkpointing = True
 
     
 
@@ -679,6 +681,7 @@ def main():
         lora_alpha=args.rank,
         init_lora_weights="gaussian",
         target_modules=["to_k", "to_q", "to_v", "to_out.0"],
+        #target_modules=["to_k", "to_q", "to_v"],
     )
 
     # Move image_encoder and vae to gpu and cast to weight_dtype
@@ -687,9 +690,6 @@ def main():
     unet.to(accelerator.device, dtype=weight_dtype)
     edge_encoder.to(accelerator.device, dtype=weight_dtype)
 
-    for name, param in edge_encoder.named_parameters():
-        if not param.requires_grad:
-            print(f"[edge_encoder] ❌ frozen param: {name}")
     
     unet.add_adapter(unet_lora_config)
     if args.mixed_precision == "fp16":
@@ -717,7 +717,15 @@ def main():
         def save_model_hook(models, weights, output_dir):
 
             for i, model in enumerate(models):
-                model.save_pretrained(os.path.join(output_dir, "unet"))
+                if hasattr(model, "save_pretrained"):
+                    print("Model Type: ", type(model))
+                    print("Model Name: ", model.__class__.__name__)
+                    model.save_pretrained(os.path.join(output_dir, "unet"))
+                elif isinstance(model, EdgeEncoder):
+                    save_path = os.path.join(output_dir, "edge_encoder.pt")
+                    torch.save(model.state_dict(), save_path)
+                else:
+                    print("Model not supported for saving")
 
                 # make sure to pop weight so that corresponding model is not saved again
                 weights.pop()
@@ -727,13 +735,20 @@ def main():
                 # pop models so that they are not loaded again
                 model = models.pop()
 
-                # load diffusers style into model
-                load_model = UNetSpatioTemporalConditionModel.from_pretrained(
-                    input_dir, subfolder="unet")
-                model.register_to_config(**load_model.config)
+                if isinstance(model, UNetSpatioTemporalConditionModel):
+                    load_model = UNetSpatioTemporalConditionModel.from_pretrained(
+                        input_dir, subfolder="unet"
+                    )
+                    model.register_to_config(**load_model.config)
+                    model.load_state_dict(load_model.state_dict())
+                    del load_model
 
-                model.load_state_dict(load_model.state_dict())
-                del load_model
+                elif isinstance(model, EdgeEncoder):
+                    edge_path = os.path.join(input_dir, "edge_encoder.pt")
+                    if os.path.exists(edge_path):
+                        model.load_state_dict(torch.load(edge_path))
+                    else:
+                        print(f"[Warning] edge_encoder.pt not found in {input_dir}")
 
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
@@ -1129,6 +1144,7 @@ def main():
                         (global_step % args.validation_steps == 0)
                         or (global_step == 1)
                     ):
+                        
                         logger.info(
                             f"Running validation... \n Generating {args.num_validation_images} videos."
                         )
@@ -1144,6 +1160,9 @@ def main():
                         )
                         pipeline = pipeline.to(accelerator.device)
                         pipeline.set_progress_bar_config(disable=True)
+                        total = sum(p.numel() for p in pipeline.unet.parameters() if p.requires_grad)
+                        print(f"UNet trainable params: {total:,}")
+                        
 
                         # run inference
                         val_save_dir = os.path.join(
@@ -1152,7 +1171,7 @@ def main():
                         if not os.path.exists(val_save_dir):
                             os.makedirs(val_save_dir)
 
-                        with torch.autocast(
+                        with torch.no_grad(), torch.autocast(
                             str(accelerator.device).replace(":0", ""), enabled=accelerator.mixed_precision == "fp16"
                         ):
                             for val_img_idx in range(args.num_validation_images):

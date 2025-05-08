@@ -453,9 +453,24 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
                 # control_input expected shape: (B, F, C, H, W)
                 if control_input.dim() == 5:
                     control_input = control_input.flatten(0, 1)  # (B * F, C, H, W)
-                # Resize control_input to match sample if needed
+
+                # Resize control_input to match sample shape
                 if control_input.shape[-2:] != sample.shape[-2:]:
                     control_input = torch.nn.functional.interpolate(control_input, size=sample.shape[-2:], mode="bilinear", align_corners=False)
+
+                # Make sure channel count matches if needed (optional projection)
+                if control_input.shape[1] != sample.shape[1]:
+                    # Project to match channel count
+                    projector = nn.Conv2d(control_input.shape[1], sample.shape[1], kernel_size=1).to(control_input.device)
+                    control_input = projector(control_input)
+                if control_input.shape[0] != sample.shape[0]:
+                    control_input = control_input.expand(sample.shape[0], -1, -1, -1)
+
+
+                print("sample.shape:", sample.shape)
+                print("control_input.shape:", control_input.shape)
+
+                assert sample.shape == control_input.shape, "Shape mismatch before residual injection"
                 sample = sample + control_input
 
             down_block_res_samples += res_samples
