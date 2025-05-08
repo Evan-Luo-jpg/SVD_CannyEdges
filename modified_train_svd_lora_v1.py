@@ -25,13 +25,14 @@ import shutil
 from pathlib import Path
 from urllib.parse import urlparse
 
+from types import MethodType
 import accelerate
 import numpy as np
 import PIL
 from PIL import Image, ImageDraw
 import torch
-import torch.nn.functional as F
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch.utils.data import RandomSampler
 import transformers
@@ -57,7 +58,6 @@ from torch.utils.data import Dataset
 from peft import LoraConfig
 from peft.utils import get_peft_model_state_dict
 from diffusers.training_utils import cast_training_params
-from modified_pipeline import CustomSVDPipeline
 
 from src.modified_unet import UNetSpatioTemporalConditionModel
 
@@ -74,20 +74,6 @@ def rand_log_normal(shape, loc=0., scale=1., device='cpu', dtype=torch.float32):
     """Draws samples from an lognormal distribution."""
     u = torch.rand(shape, dtype=dtype, device=device) * (1 - 2e-7) + 1e-7
     return torch.distributions.Normal(loc, scale).icdf(u).exp()
-
-class EdgeEncoder(nn.Module):
-    def __init__(self, out_channels):
-        super().__init__()
-        self.encoder = nn.Sequential(
-            nn.Conv2d(1, 64, 3, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(64, 128, 3, padding=1),
-            nn.SiLU(),
-            nn.Conv2d(128, out_channels, 3, padding=1),
-        )
-
-    def forward(self, edge_map):  # (B, 1, H, W)
-        return self.encoder(edge_map)  # (B, out_channels, H, W)
 
 
 class DummyDataset(Dataset):
@@ -149,6 +135,7 @@ class DummyDataset(Dataset):
             pixel_values[i] = combined
 
         return {'pixel_values': pixel_values}
+
 
 # resizing utils
 # TODO: clean up later
@@ -304,6 +291,7 @@ def tensor_to_vae_latent(t, vae):
     latents = latents * vae.config.scaling_factor
 
     return latents
+
 
 
 def parse_args():
@@ -643,22 +631,55 @@ def main():
     )
     vae = AutoencoderKLTemporalDecoder.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision, variant="fp16")
+
+    old_conv = vae.encoder.conv_in
+    assert old_conv.in_channels == 3
+
+    # Make new conv with 4 channels
+    new_conv = nn.Conv2d(
+        in_channels=4,
+        out_channels=old_conv.out_channels,
+        kernel_size=old_conv.kernel_size,
+        stride=old_conv.stride,
+        padding=old_conv.padding,
+        bias=old_conv.bias is not None
+    )
+
+    # Copy RGB weights and freeze them
+    with torch.no_grad():
+        new_conv.weight[:, :3] = old_conv.weight  # Copy RGB
+        new_conv.weight[:, 3] = 0.0               # Init canny channel to 0
+
+    # Replace the conv layer
+    vae.encoder.conv_in = new_conv
+
+    # Freeze RGB input weights
+    vae.encoder.conv_in.weight.requires_grad = True  # enable gradients
+    vae.encoder.conv_in.bias.requires_grad = old_conv.bias is not None
+
+    # Freeze RGB channel slices manually using a hook
+    def freeze_rgb_gradients(module, grad_input, grad_output):
+        grad = grad_input[0]
+        if grad is not None:
+            grad[:, :3, :, :] = 0  # zero out RGB channel grads
+            return (grad,) + grad_input[1:]
+
     unet = UNetSpatioTemporalConditionModel.from_pretrained(
+        #Here is where we should input the pretrained-unet
         args.pretrained_model_name_or_path if args.pretrain_unet is None else args.pretrain_unet,
         subfolder="unet",
         low_cpu_mem_usage=True,
         variant="fp16",
     )
-    edge_encoder = EdgeEncoder(out_channels=320)
-
-
+    config = unet.config
+    config["in_channels"] = 8
+    unet = UNetSpatioTemporalConditionModel(**config)
     #Auto enable gradient checkpointing
     unet.gradient_checkpointing = True
 
-    
-
     # Freeze vae and image_encoder
-    vae.requires_grad_(False)
+    print("[vae patch] conv_in modified: RGB channels frozen, canny trainable")
+    vae.encoder.conv_in.register_backward_hook(freeze_rgb_gradients)
     image_encoder.requires_grad_(False)
     unet.requires_grad_(False)
 
@@ -685,17 +706,11 @@ def main():
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     unet.to(accelerator.device, dtype=weight_dtype)
-    edge_encoder.to(accelerator.device, dtype=weight_dtype)
-
-    for name, param in edge_encoder.named_parameters():
-        if not param.requires_grad:
-            print(f"[edge_encoder] ❌ frozen param: {name}")
     
     unet.add_adapter(unet_lora_config)
     if args.mixed_precision == "fp16":
         # only upcast trainable parameters (LoRA) into fp32
         cast_training_params(unet, dtype=torch.float32)
-        cast_training_params(edge_encoder, dtype=torch.float32)
 
     if args.enable_xformers_memory_efficient_attention:
         if is_xformers_available():
@@ -766,9 +781,8 @@ def main():
         optimizer_cls = torch.optim.AdamW
 
     lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
-    params_to_optimize = list(lora_layers) + list(edge_encoder.parameters())
     optimizer = optimizer_cls(
-        params_to_optimize,
+        lora_layers,
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
@@ -815,8 +829,8 @@ def main():
     )
 
     # Prepare everything with our `accelerator`.
-    unet, optimizer, lr_scheduler, train_dataloader, edge_encoder = accelerator.prepare(
-        unet, optimizer, lr_scheduler, train_dataloader, edge_encoder
+    unet, optimizer, lr_scheduler, train_dataloader = accelerator.prepare(
+        unet, optimizer, lr_scheduler, train_dataloader
     )
 
     # attribute handling for models using DDP
@@ -854,25 +868,33 @@ def main():
     first_epoch = 0
 
     def encode_image(pixel_values):
-        # pixel: [-1, 1]
+        """
+        Accepts a tensor [B, C, H, W] with values in [-1, 1] and returns image embeddings.
+        """
+        
+        # Resize to 224 x 224 for CLIP
         pixel_values = _resize_with_antialiasing(pixel_values, (224, 224))
-        # We unnormalize it after resizing.
-        pixel_values = (pixel_values + 1.0) / 2.0
 
-        # Normalize the image with for CLIP input
-        pixel_values = feature_extractor(
-            images=pixel_values,
-            do_normalize=True,
-            do_center_crop=False,
-            do_resize=False,
-            do_rescale=False,
+        # Convert from [-1, 1] to [0, 255] as uint8
+        pixel_values = ((pixel_values + 1.0) * 127.5).clamp(0, 255).byte()
+
+        np_images = []
+        for i in range(pixel_values.shape[0]):
+            img_tensor = pixel_values[i].cpu()  # [C, H, W]
+            img_np = img_tensor.permute(1, 2, 0).numpy()  # [H, W, C]
+            np_images.append(img_np)
+
+        # Now pass the list of valid NumPy arrays into the processor
+        processed = feature_extractor(
+            images=np_images,
             return_tensors="pt",
-        ).pixel_values
+        ).pixel_values.to(device=accelerator.device, dtype=weight_dtype)
 
-        pixel_values = pixel_values.to(
-            device=accelerator.device, dtype=weight_dtype)
-        image_embeddings = image_encoder(pixel_values).image_embeds
-        return image_embeddings
+        image_embeds = image_encoder(processed).image_embeds  # [B, D]
+        image_embeds = image_embeds.unsqueeze(1).repeat(1, args.num_frames, 1)  # [B, F, D]
+
+        return image_embeds
+
 
     def _get_add_time_ids(
         fps,
@@ -944,8 +966,7 @@ def main():
                 )
                 conditional_pixel_values = pixel_values[:, 0:1, :, :, :]
 
-                # pixel_values: (B, F, 4, H, W) so onlt keep rgb
-                latents = tensor_to_vae_latent(pixel_values[:, :, :3, :, :], vae)
+                latents = tensor_to_vae_latent(pixel_values, vae)
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
@@ -956,7 +977,7 @@ def main():
                 cond_sigmas = cond_sigmas[:, None, None, None, None]
                 conditional_pixel_values = \
                     torch.randn_like(conditional_pixel_values) * cond_sigmas + conditional_pixel_values
-                conditional_latents = tensor_to_vae_latent(conditional_pixel_values[:, :, :3, :, :], vae)[:, 0, :, :, :]
+                conditional_latents = tensor_to_vae_latent(conditional_pixel_values, vae)[:, 0, :, :, :]
                 conditional_latents = conditional_latents / vae.config.scaling_factor
 
                 # Sample a random timestep for each image
@@ -972,9 +993,8 @@ def main():
                 inp_noisy_latents = noisy_latents / ((sigmas**2 + 1) ** 0.5)
 
                 # Get the text embedding for conditioning.
-                encoder_hidden_states = encode_image(
-                    pixel_values[:, 0, :3, :, :].float())
-
+                encoder_hidden_states = encode_image(pixel_values[:, 0, :3, :, :].float())
+            
                 # Here I input a fixed numerical value for 'motion_bucket_id', which is not reasonable.
                 # However, I am unable to fully align with the calculation method of the motion score,
                 # so I adopted this approach. The same applies to the 'fps' (frames per second).
@@ -1016,31 +1036,27 @@ def main():
                 inp_noisy_latents = torch.cat(
                     [inp_noisy_latents, conditional_latents], dim=2)
                 
-
-                edge = pixel_values[:, :, 3:, :, :]  # (B, F, 1, H, W)
-                edge = edge.reshape(-1, 1, args.height, args.width)  # (B*F, 1, H, W)
-                edge_features = edge_encoder(edge)  # (B*F, C, h, w)
-
-                # reshape back to (B, F, C, h, w)
-                edge_features = edge_features.reshape(bsz, args.num_frames, 320, edge_features.shape[-2], edge_features.shape[-1])
-                '''
-                SHAPE CHECKS BEFORE UNET CALL
-                inp_noisy_latents:       torch.Size([1, 12, 8, 32, 56])
-                timesteps:               torch.Size([1])
-                encoder_hidden_states:   torch.Size([1, 1, 1024])
-                added_time_ids:          torch.Size([1, 3])
-                '''
-
                 print("SHAPE CHECKS BEFORE UNET CALL")
                 print(f"  inp_noisy_latents:       {inp_noisy_latents.shape}")   # [B, F, C, H, W]
-                print(f"  timesteps:               {timesteps.shape}")           # [1]
+                print(f"  timesteps:               {timesteps.shape}")           # [B, 1]
                 print(f"  encoder_hidden_states:   {encoder_hidden_states.shape}")  # Should be [B, F, D]
-                print(f"  added_time_ids:          {added_time_ids.shape}")         # Should be [B, 3]
+                print(f"  added_time_ids:          {added_time_ids.shape}")         # Should be [B, 3] or similar
 
+                # Fix shapes if needed
+                if encoder_hidden_states.ndim == 4 and encoder_hidden_states.shape[1] == 1:
+                    encoder_hidden_states = encoder_hidden_states.squeeze(1)
+
+                if encoder_hidden_states.ndim == 2:
+                    encoder_hidden_states = encoder_hidden_states.unsqueeze(1).repeat(1, args.num_frames, 1)
+
+                assert encoder_hidden_states.ndim == 3, f"encoder_hidden_states wrong shape: {encoder_hidden_states.shape}"
+                assert encoder_hidden_states.shape[1] == args.num_frames
+
+                
                 # check https://arxiv.org/abs/2206.00364(the EDM-framework) for more details.
                 target = latents
                 model_pred = unet(
-                    inp_noisy_latents, timesteps, encoder_hidden_states, added_time_ids=added_time_ids, control_input=edge_features).sample
+                    inp_noisy_latents, timesteps, encoder_hidden_states, added_time_ids=added_time_ids).sample
 
                 # Denoise the latents
                 c_out = -sigmas / ((sigmas**2 + 1)**0.5)
@@ -1133,7 +1149,7 @@ def main():
                             f"Running validation... \n Generating {args.num_validation_images} videos."
                         )
                         # The models need unwrapping because for compatibility in distributed training mode.
-                        pipeline = CustomSVDPipeline.from_pretrained(
+                        pipeline = StableVideoDiffusionPipeline.from_pretrained(
                             args.pretrained_model_name_or_path,
                             unet=accelerator.unwrap_model(unet),
                             image_encoder=accelerator.unwrap_model(
@@ -1142,6 +1158,36 @@ def main():
                             revision=args.revision,
                             torch_dtype=weight_dtype,
                         )
+
+                        def patched_encode_image(self, image, device, num_videos_per_prompt, do_classifier_free_guidance):
+                            # image: PIL or np.ndarray with 4 channels (RGB + canny)
+                            if isinstance(image, PIL.Image.Image):
+                                image = np.array(image)
+
+                            if image.shape[-1] == 4:
+                                print("[patched pipeline] Stripping canny, keeping RGB")
+                                image = image[..., :3]
+
+                            # Pass to feature extractor like normal
+                            inputs = self.feature_extractor(
+                                images=image,
+                                return_tensors="pt"
+                            ).pixel_values.to(device=device, dtype=self.image_encoder.dtype)
+
+                            image_embeds = self.image_encoder(inputs).image_embeds  # [B, D]
+
+                            if do_classifier_free_guidance:
+                                uncond_images = torch.zeros_like(inputs)
+                                uncond_embeds = self.image_encoder(uncond_images).image_embeds
+                                image_embeds = torch.cat([uncond_embeds, image_embeds], dim=0)
+
+                            image_embeds = image_embeds.unsqueeze(1).repeat(1, num_frames, 1)  # [B, F, D]
+
+                            return image_embeds
+
+                        # Patch the method on your pipeline instance
+                        pipeline._encode_image = MethodType(patched_encode_image, pipeline)
+
                         pipeline = pipeline.to(accelerator.device)
                         pipeline.set_progress_bar_config(disable=True)
 
@@ -1157,16 +1203,19 @@ def main():
                         ):
                             for val_img_idx in range(args.num_validation_images):
                                 num_frames = args.num_frames
-                                image_rgb = load_image('demo.jpg').resize((args.width, args.height))
-                                rgb_array = np.array(image_rgb)
+                                rgb_image = load_image('demo.jpg').resize((args.width, args.height))
+                                rgb_array = np.array(rgb_image)  # Shape: (H, W, 3)
+
+                                # Compute canny edge map
                                 gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
                                 edges = cv2.Canny(gray, 100, 200)
-                                edge_tensor = torch.from_numpy(edges).float().unsqueeze(0).unsqueeze(0) / 127.5 - 1  # (1, 1, H, W)
-                                edge_tensor = edge_tensor.to(accelerator.device).to(weight_dtype)
-                                control_tensor = edge_encoder(edge_tensor) 
+                                edges = np.expand_dims(edges, axis=-1)  # Shape: (H, W, 1)
 
+                                # Stack to 4-channel image: RGB + canny
+                                image_4ch = np.concatenate([rgb_array, edges], axis=-1).astype(np.uint8)
+                                image_4ch = Image.fromarray(image_4ch, mode="RGBA")                          
                                 video_frames = pipeline(
-                                    image_rgb,
+                                    image_4ch,
                                     height=args.height,
                                     width=args.width,
                                     num_frames=num_frames,
@@ -1174,7 +1223,6 @@ def main():
                                     motion_bucket_id=127,
                                     fps=7,
                                     noise_aug_strength=0.02,
-                                    control_input=control_tensor
                                     # generator=generator,
                                 ).frames[0]
 

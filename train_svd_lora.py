@@ -994,12 +994,19 @@ def main():
                     1).repeat(1, noisy_latents.shape[1], 1, 1, 1)
                 inp_noisy_latents = torch.cat(
                     [inp_noisy_latents, conditional_latents], dim=2)
+                '''
+                SHAPE CHECKS BEFORE UNET CALL
+                inp_noisy_latents:       torch.Size([1, 12, 8, 32, 56])
+                timesteps:               torch.Size([1])
+                encoder_hidden_states:   torch.Size([1, 1, 1024])
+                added_time_ids:          torch.Size([1, 3])
+                '''
 
                 print("SHAPE CHECKS BEFORE UNET CALL")
                 print(f"  inp_noisy_latents:       {inp_noisy_latents.shape}")   # [B, F, C, H, W]
-                print(f"  timesteps:               {timesteps.shape}")           # [B, 1]
+                print(f"  timesteps:               {timesteps.shape}")           # [1]
                 print(f"  encoder_hidden_states:   {encoder_hidden_states.shape}")  # Should be [B, F, D]
-                print(f"  added_time_ids:          {added_time_ids.shape}")         # Should be [B, F, 3] or similar
+                print(f"  added_time_ids:          {added_time_ids.shape}")         # Should be [B, 3]
 
                 # check https://arxiv.org/abs/2206.00364(the EDM-framework) for more details.
                 target = latents

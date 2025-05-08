@@ -17,7 +17,7 @@ from diffusers.models.unets.unet_3d_blocks import UNetMidBlockSpatioTemporal, ge
 
 logger = logging.get_logger(__name__)  # pylint: disable=invalid-name
 
-
+    
 @dataclass
 class UNetSpatioTemporalConditionOutput(BaseOutput):
     """
@@ -362,6 +362,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
         added_time_ids: torch.Tensor,
+        control_input=None,
         return_dict: bool = True,
     ) -> Union[UNetSpatioTemporalConditionOutput, Tuple]:
         r"""
@@ -432,7 +433,7 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
         image_only_indicator = torch.zeros(batch_size, num_frames, dtype=sample.dtype, device=sample.device)
 
         down_block_res_samples = (sample,)
-        for downsample_block in self.down_blocks:
+        for i, downsample_block in enumerate(self.down_blocks):
             if hasattr(downsample_block, "has_cross_attention") and downsample_block.has_cross_attention:
                 sample, res_samples = downsample_block(
                     hidden_states=sample,
@@ -446,6 +447,16 @@ class UNetSpatioTemporalConditionModel(ModelMixin, ConfigMixin, UNet2DConditionL
                     temb=emb,
                     image_only_indicator=image_only_indicator,
                 )
+
+            #For the control_input
+            if i == 0 and control_input is not None:
+                # control_input expected shape: (B, F, C, H, W)
+                if control_input.dim() == 5:
+                    control_input = control_input.flatten(0, 1)  # (B * F, C, H, W)
+                # Resize control_input to match sample if needed
+                if control_input.shape[-2:] != sample.shape[-2:]:
+                    control_input = torch.nn.functional.interpolate(control_input, size=sample.shape[-2:], mode="bilinear", align_corners=False)
+                sample = sample + control_input
 
             down_block_res_samples += res_samples
 

@@ -404,6 +404,7 @@ class StableVideoDiffusionPipeline(DiffusionPipeline):
         callback_on_step_end: Optional[Callable[[int, int, Dict], None]] = None,
         callback_on_step_end_tensor_inputs: List[str] = ["latents"],
         return_dict: bool = True,
+        control_input=None
     ):
         r"""
         The call function to the pipeline for generation.
