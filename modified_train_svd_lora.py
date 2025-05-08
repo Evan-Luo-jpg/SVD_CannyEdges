@@ -1120,7 +1120,7 @@ def main():
                                     shutil.rmtree(removing_checkpoint)
 
                         save_path = os.path.join(
-                            args.output_dir, f"checkpoint-{global_step}")
+                            args.output_dir, f"modified_checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
                         
@@ -1166,7 +1166,7 @@ def main():
 
                         # run inference
                         val_save_dir = os.path.join(
-                            args.output_dir, "validation_images")
+                            args.output_dir, "modified_validation_images")
 
                         if not os.path.exists(val_save_dir):
                             os.makedirs(val_save_dir)
@@ -1224,7 +1224,7 @@ def main():
 
         unwrapped_unet = accelerator.unwrap_model(unet)
         unet_lora_state_dict = convert_state_dict_to_diffusers(get_peft_model_state_dict(unwrapped_unet))
-        unwrapped_unet.save_attn_procs(os.path.join(args.output_dir, "lora"))
+        unwrapped_unet.save_attn_procs(os.path.join(args.output_dir, "lora_modified"))
         
         # StableVideoDiffusionPipeline.save_lora_weights(
         #     save_directory=args.output_dir,

@@ -30,7 +30,7 @@ class EdgeEncoder(nn.Module):
 # ----- CONFIGURATION -----
 BASE_DIR = os.path.expanduser(os.environ.get("BASE_DIR", "~/scratch/CVFinal"))
 PRETRAINED_MODEL = "stabilityai/stable-video-diffusion-img2vid"
-LORA_PATH = f"{BASE_DIR}/lora"
+LORA_PATH = f"{BASE_DIR}/modified_lora"
 IMAGE_PATH = f"{BASE_DIR}/SVD_Xtend/demo.jpg"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -53,7 +53,7 @@ feature_extractor = CLIPImageProcessor.from_pretrained(PRETRAINED_MODEL, subfold
 
 # Optional: load edge encoder used in training
 edge_encoder = EdgeEncoder(out_channels=320).to(DEVICE, dtype=torch.float16)
-edge_encoder.load_state_dict(torch.load(f"{BASE_DIR}/checkpoint-50/edge_encoder.pt"))  # if saved separately
+edge_encoder.load_state_dict(torch.load(f"{BASE_DIR}/modified-checkpoint-500/edge_encoder.pt"))  # if saved separately
 edge_encoder.eval()
 
 # ----- Create Pipeline -----
@@ -75,22 +75,23 @@ edge_tensor = torch.from_numpy(edges).float().unsqueeze(0).unsqueeze(0) / 127.5 
 edge_tensor = edge_tensor.to(DEVICE, dtype=torch.float16)
 
 control_tensor = edge_encoder(edge_tensor)
-num_frames = 4
+num_frames = 8
 
 # ----- Run Inference -----
 print("Generating video...")
-out = pipeline(
-    image,
-    height=128,
-    width=256,
-    num_frames=num_frames,
-    motion_bucket_id=127,
-    fps=2,
-    noise_aug_strength=0.02,
-    control_input=control_tensor,
-)["frames"][0]
+with torch.no_grad():
+    out = pipeline(
+        image,
+        height=64,
+        width=128,
+        num_frames=num_frames,
+        motion_bucket_id=127,
+        fps=7,
+        noise_aug_strength=0.02,
+        control_input=control_tensor,
+    )["frames"][0]
 
 # ----- Save as GIF -----
-out_path = os.path.join(BASE_DIR, "inference_output.gif")
-Image.fromarray(out[0]).save(out_path, save_all=True, append_images=[Image.fromarray(f) for f in out[1:]], duration=500, loop=0)
+out_path = os.path.join(BASE_DIR, "modified_inference_output.gif")
+out[0].save(out_path, save_all=True, append_images=out[1:], duration=500, loop=0)
 print(f"Saved inference video to {out_path}")
