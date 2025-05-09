@@ -104,7 +104,12 @@ class DummyDataset(Dataset):
         # Randomly select a folder (representing a video) from the base folder
         chosen_folder = random.choice(self.folders)
         folder_path = os.path.join(self.base_folder, chosen_folder)
-        frames = os.listdir(folder_path)
+
+        #Only Include files for this one
+        frames = [
+                f for f in os.listdir(folder_path)
+                if os.path.isfile(os.path.join(folder_path, f))
+            ]
         # Sort the frames by name
         frames.sort()
 

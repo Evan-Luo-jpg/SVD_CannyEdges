@@ -87,8 +87,8 @@ class EdgeEncoder(nn.Module):
             nn.Conv2d(32, out_channels, 3, padding=1),
         )
 
-    def forward(self, edge_map):  # (B, 1, H, W)
-        return self.encoder(edge_map)  # (B, out_channels, H, W)
+    def forward(self, edge_map): 
+        return self.encoder(edge_map) 
 
 
 class DummyDataset(Dataset):
@@ -134,19 +134,19 @@ class DummyDataset(Dataset):
             # Load and resize RGB
             with Image.open(frame_path) as img:
                 img = img.resize((self.width, self.height))
-                img_tensor = torch.from_numpy(np.array(img)).float() / 127.5 - 1  # [-1, 1]
-                img_tensor = img_tensor.permute(2, 0, 1)  # (3, H, W)
+                img_tensor = torch.from_numpy(np.array(img)).float() / 127.5 - 1
+                img_tensor = img_tensor.permute(2, 0, 1)
 
             # Load and resize edge map
             with Image.open(edge_path) as edge_img:
                 edge_img = edge_img.resize((self.width, self.height))
-                edge_tensor = torch.from_numpy(np.array(edge_img)).float() / 127.5 - 1  # [-1, 1]
+                edge_tensor = torch.from_numpy(np.array(edge_img)).float() / 127.5 - 1
                 if edge_tensor.ndim == 2:
-                    edge_tensor = edge_tensor.unsqueeze(0)  # (1, H, W)
+                    edge_tensor = edge_tensor.unsqueeze(0)
                 elif edge_tensor.ndim == 3:
-                    edge_tensor = edge_tensor[0:1, :, :]  # keep one channel
+                    edge_tensor = edge_tensor[0:1, :, :] 
 
-            combined = torch.cat([img_tensor, edge_tensor], dim=0)  # (4, H, W)
+            combined = torch.cat([img_tensor, edge_tensor], dim=0)
             pixel_values[i] = combined
 
         return {'pixel_values': pixel_values}
@@ -657,7 +657,6 @@ def main():
     unet.gradient_checkpointing = True
     edge_encoder.gradient_checkpointing = True
 
-    
 
     # Freeze vae and image_encoder
     vae.requires_grad_(False)
@@ -725,7 +724,7 @@ def main():
                     save_path = os.path.join(output_dir, "edge_encoder.pt")
                     torch.save(model.state_dict(), save_path)
                 else:
-                    print("Model not supported for saving")
+                    print("Model not supported for saving?????")
 
                 # make sure to pop weight so that corresponding model is not saved again
                 weights.pop()
@@ -1032,14 +1031,14 @@ def main():
                     [inp_noisy_latents, conditional_latents], dim=2)
                 
 
-                edge = pixel_values[:, :, 3:, :, :]  # (B, F, 1, H, W)
-                edge = edge.reshape(-1, 1, args.height, args.width)  # (B*F, 1, H, W)
-                edge_features = edge_encoder(edge)  # (B*F, C, h, w)
+                edge = pixel_values[:, :, 3:, :, :] 
+                edge = edge.reshape(-1, 1, args.height, args.width) 
+                edge_features = edge_encoder(edge)  
 
-                # reshape back to (B, F, C, h, w)
                 edge_features = edge_features.reshape(bsz, args.num_frames, 320, edge_features.shape[-2], edge_features.shape[-1])
                 '''
                 SHAPE CHECKS BEFORE UNET CALL
+                THIS IS WHAT IT SHOULD VAUGELY LOOK LIKE
                 inp_noisy_latents:       torch.Size([1, 12, 8, 32, 56])
                 timesteps:               torch.Size([1])
                 encoder_hidden_states:   torch.Size([1, 1, 1024])
@@ -1176,6 +1175,7 @@ def main():
                         ):
                             for val_img_idx in range(args.num_validation_images):
                                 num_frames = args.num_frames
+                                #I guess could be any image
                                 image_rgb = load_image('demo.jpg').resize((args.width, args.height))
                                 rgb_array = np.array(image_rgb)
                                 gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
