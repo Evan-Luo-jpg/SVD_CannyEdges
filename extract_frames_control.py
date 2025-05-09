@@ -7,7 +7,7 @@ def extract_frames_with_edges(video_path, output_dir, target_fps=24):
     frame_output_dir = os.path.join(output_dir, video_name)
     edge_output_dir = os.path.join(frame_output_dir, "canny")
 
-    # Create directories
+    # make directory
     os.makedirs(frame_output_dir, exist_ok=True)
     os.makedirs(edge_output_dir, exist_ok=True)
 
@@ -34,10 +34,10 @@ def extract_frames_with_edges(video_path, output_dir, target_fps=24):
             frame_filename = f"frame_{saved_count:05d}.jpg"
             edge_filename = f"edge_{saved_count:05d}.png"
 
-            # Save original frame
+            # original frame
             cv2.imwrite(os.path.join(frame_output_dir, frame_filename), frame)
 
-            # Convert to grayscale and compute canny edges
+            #grayscale and compute canny
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             edges = cv2.Canny(gray, threshold1=100, threshold2=200)
             cv2.imwrite(os.path.join(edge_output_dir, edge_filename), edges)
