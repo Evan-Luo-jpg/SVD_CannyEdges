@@ -6,7 +6,7 @@ PYTHON_DIR=~/scratch/CVFinal
 for video in ${BASE_FOLDER}/*.mov
 do
   # Run the python script on that folder
-  python ${PYTHON_DIR}/extract_frames.py \
+  python ${PYTHON_DIR}/extract_frames_control.py \
     --video_path ${video} \
     --output_dir ${OUTPUT_DIR}
 done
