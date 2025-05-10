@@ -6,8 +6,7 @@ from PIL import Image
 import torch.nn as nn
 from transformers import CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import AutoencoderKLTemporalDecoder
-from peft.utils import get_peft_model_state_dict
-from diffusers.utils import load_image, convert_state_dict_to_diffusers
+from diffusers.utils import load_image
 from modified_pipeline import CustomSVDPipeline
 from src.modified_unet import UNetSpatioTemporalConditionModel
 
@@ -31,7 +30,7 @@ class EdgeEncoder(nn.Module):
 BASE_DIR = os.path.expanduser(os.environ.get("BASE_DIR", "~/scratch/CVFinal"))
 PRETRAINED_MODEL = "stabilityai/stable-video-diffusion-img2vid"
 LORA_PATH = f"{BASE_DIR}/lora"
-IMAGE_PATH = f"{BASE_DIR}/SVD_Xtend/demo.jpg"
+IMAGE_PATH = f"{BASE_DIR}/SVD_Xtend/demo1.jpg"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ----- Load Model Components -----
