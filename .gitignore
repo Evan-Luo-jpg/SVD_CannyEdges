@@ -3,3 +3,4 @@ objaverse-xl/
 renders/
 generative-models/
 SVD_Xtend/
+SVD_pipeline.py
