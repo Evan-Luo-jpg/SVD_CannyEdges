@@ -29,8 +29,8 @@ class EdgeEncoder(nn.Module):
 # ----- CONFIGURATION -----
 BASE_DIR = os.path.expanduser(os.environ.get("BASE_DIR", "~/scratch/CVFinal"))
 PRETRAINED_MODEL = "stabilityai/stable-video-diffusion-img2vid"
-LORA_PATH = f"{BASE_DIR}/lora"
-IMAGE_PATH = f"{BASE_DIR}/SVD_Xtend/demo1.jpg"
+LORA_PATH = f"{BASE_DIR}/lora_modified"
+IMAGE_PATH = f"{BASE_DIR}/SVD_Xtend_Canny/demo1.jpg"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ----- Load Model Components -----
@@ -50,6 +50,11 @@ image_encoder = CLIPVisionModelWithProjection.from_pretrained(
 
 feature_extractor = CLIPImageProcessor.from_pretrained(PRETRAINED_MODEL, subfolder="feature_extractor")
 
+# Optional: load edge encoder used in training
+edge_encoder = EdgeEncoder(out_channels=320).to(DEVICE, dtype=torch.float16)
+edge_encoder.load_state_dict(torch.load(f"{BASE_DIR}/modified-checkpoint-500/edge_encoder.pt"))  # if saved separately
+edge_encoder.eval()
+
 # ----- Create Pipeline -----
 pipeline = CustomSVDPipeline.from_pretrained(
     PRETRAINED_MODEL,
@@ -60,24 +65,32 @@ pipeline = CustomSVDPipeline.from_pretrained(
     torch_dtype=torch.float16,
 ).to(DEVICE)
 
-# ----- Prepare Input Image -----
-num_frames = 12
+# ----- Prepare Input Image and Edge Map -----
 image = load_image(IMAGE_PATH).resize((320, 192))
+rgb_array = np.array(image)
+gray = cv2.cvtColor(rgb_array, cv2.COLOR_RGB2GRAY)
+edges = cv2.Canny(gray, 100, 200)
+edge_tensor = torch.from_numpy(edges).float().unsqueeze(0).unsqueeze(0) / 127.5 - 1  # (1, 1, H, W)
+edge_tensor = edge_tensor.to(DEVICE, dtype=torch.float16)
+
+control_tensor = edge_encoder(edge_tensor)
+num_frames = 8
 
 # ----- Run Inference -----
 print("Generating video...")
 with torch.no_grad():
     out = pipeline(
         image,
-        height=256,
-        width=448,
+        height=64,
+        width=128,
         num_frames=num_frames,
         motion_bucket_id=127,
         fps=7,
         noise_aug_strength=0.02,
+        control_input=control_tensor,
     )["frames"][0]
 
 # ----- Save as GIF -----
-out_path = os.path.join(BASE_DIR, "lora_inference_output.gif")
+out_path = os.path.join(BASE_DIR, "modified_inference_output.gif")
 out[0].save(out_path, save_all=True, append_images=out[1:], duration=500, loop=0)
 print(f"Saved inference video to {out_path}")
