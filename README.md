@@ -55,7 +55,7 @@ You may have to modify your base folder to match wherever you cloned the repo. T
 ```bash
 --num_processes=2
 ```
-Also, you will need a minimum of 24 GB of VRAM to train and run inference on the models, even with the weights loaded, so this will likely not work locally. More args be found in the training script where
+Also, you will need a minimum of 24 GB of VRAM to train and run inference on the models, even with the weights loaded, so this will likely not work locally. More args be found in the training script as well.
 
 ## Acknowledgement
 
