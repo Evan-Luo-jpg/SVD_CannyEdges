@@ -23,7 +23,7 @@ self.base_folder
 We have scripts that do this for you, depending on the model you want to run. You will need to change the `BASE_FOLDER` to match your base folder.
 
 ## Running the model
-To run the model, clone the github repo. Here are the pretrained weights for if you just want to run inference on the BDD100K trained model (weights)[https://drive.google.com/drive/folders/18FeLhJ_C3SEs9GQ14LHCjFveGnZQgbIH?usp=drive_link]. 
+To run the model, clone the GitHub repo. Here are the pretrained weights for if you just want to run inference on the BDD100K trained model [weights](https://drive.google.com/drive/folders/18FeLhJ_C3SEs9GQ14LHCjFveGnZQgbIH?usp=drive_link). 
 The oscar.sh file is in this format:
 ```bash
 module load cudnn cuda
