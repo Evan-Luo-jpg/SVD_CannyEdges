@@ -20,7 +20,7 @@ self.base_folder
     │   ├── video_frame1
         ├── ...
 ```
-We have scripts that do this for you, depending on the model you want to run. You will need to change the `BASE_FOLDER` to match your base folder.
+We have scripts that do this for you, depending on the model you want to run. You will need to change the `DATA_FOLDER` and `BASE` to match your data folder and base, respectively.
 
 ## Running the model
 To run the model, clone the GitHub repo. Here are the pretrained weights for if you just want to run inference on the BDD100K trained model [weights](https://drive.google.com/drive/folders/18FeLhJ_C3SEs9GQ14LHCjFveGnZQgbIH?usp=drive_link). 
