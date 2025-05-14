@@ -4,7 +4,7 @@ This repository fine-tunes [Stable Video Diffusion](https://huggingface.co/stabi
 
 ---
 
-## 📁 Dataset: BDD100K
+## Dataset: BDD100K
 
 We use 172 videos from the BDD100K driving dataset. Each video is extracted into individual frames and stored in its own folder. For the modified training script, we also extracted Canny edges from each frame and saved them in a subfolder inside the dataset folder.
 
